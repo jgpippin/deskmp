@@ -1,1 +1,8 @@
+; $Id$
 name = Desk Multipass
+description = Integration with Desk.com
+core = 7.x
+package = Custom
+
+files[] = desk.module
+files[] = desk.install
