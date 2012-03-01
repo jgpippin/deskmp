@@ -5,26 +5,187 @@
  * Description of module file
  */
 
-define('DESKMP_SITE_KEY', 'mynd5');
-define('DESKMP_MULTIPASS_API_KEY', 'e03036f043f6012fb23c12313e001e42');
+define('DESKMP_SITE_KEY', variable_get('deskmp_site_key', NULL));
+define('DESKMP_MULTIPASS_API_KEY', variable_get('deskmp_multipass_key', NULL));
 
 
 /**
- * Implementation of hook_menu
+ * Implement hook_menu
  */
 function deskmp_menu() {
   $items = array();
 
-  $items['support'] = array(
+  $items['admin/config/system/deskmp'] = array(
+    'title' => 'Desk Multipass', 
+    'description' => 'Manage your integration settings with Desk.com', 
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('deskmp_admin_form'),
+    'access callback' => 'user_access',
+    'access arguments' => array('administer desk multipass'),
+    'type' => MENU_NORMAL_ITEM,
+  );
+  
+  $items[variable_get('deskmp_path', 'support')] = array(
     'title' => 'Support', 
-    'description' => 'Support', 
     'page callback' => 'deskmp_redirect',
     'access callback' => TRUE,
-    'type' => MENU_CALLBACK,
+    'type' => MENU_NORMAL_ITEM,
   );
 
   return $items;
 }
+
+
+
+/**
+ * Implement hook_permission.
+ */
+function deskmp_permission() {
+  return array(
+    'administer desk multipass' => array(
+      'title' => t('Administer Desk.com Multipass'), 
+      'description' => t('Administer API entries and settings for Desk.com multipass integration.'),
+    ),
+  );
+}
+
+
+
+/**
+ * Implement hook_user_login.
+ */
+function deskmp_user_login(&$edit, $account) {
+  // Redirect the user to the Desk.com page if this setting is on and the url is
+  // user/login/desk. This is where the desk.com multipass login callback should
+  // point to.
+  if (!isset($_POST['form_id']) || $_POST['form_id'] != 'user_pass_reset') {
+    if (variable_get('deskmp_redirect', TRUE) && ($_GET['q'] == 'user/login/desk') && !isset($_GET['destination'])) {
+      deskmp_redirect();
+    }
+  }
+}
+
+
+
+/**
+ * Implement hook_user_logout.
+ */
+function deskmp_user_logout($account) {
+  // Redirect the user to the Desk.com page if this setting is on and the url is
+  // user/logout/desk. This is where the desk.com multipass logout callback 
+  // should point to.
+  if (variable_get('deskmp_redirect', TRUE) && ($_GET['q'] == 'user/logout/desk') && !isset($_GET['destination'])) {
+    deskmp_redirect();
+  }
+}
+
+
+
+/**
+ * Implement hook_help.
+ */
+function deskmp_help($path, $arg) {
+  switch ($path) {
+    case 'admin/help#deskmp':
+      $output = '';
+      $output .= '<h3>' . t('About') . '</h3>';
+      $output .= '<p>' . t("The Desk Multipass module implements the single sign-on capabilities of support solution provider Desk.com") . '<p>';
+      
+      $output .= '<h3>' . t('Requirements') . '</h3>';
+      $link = l(t('You can read more about multipass here.'), 'http://dev.desk.com/docs/portal/multipass');
+      $output .= '<p>' . t("You will need a Desk.com account (http://yourname.desk.com) with a multipass API key.  !link", array('!link' => $link)) . '<p>';
+      
+      $output .= '<h3>' . t('Usage') . '</h3>';
+      $output .= '<p>' . t("When you configure Desk.com Multipass with your site key and multipass api, you can set a menu item (such as /support) that will automatically redirect the user to your Desk.com installation. If the user does not already exist, it will be created.") . '<p>';
+      
+      global $base_url;
+      $login = $base_url . '/user/login/desk';
+      $logout = $base_url . '/user/logout/desk';
+      $output .= '<p>' . t("Desk.com also allows you to define login and logout redirection URLs so that users who click 'Login' or 'Logout' from Desk.com will be redirected back to your site.  If you have enabled redirection on the settings page (it is on by default), set these as @login and @logout, respectively. If the user clicks login or logout on the Desk.com installation with these addresses in place, they will be sent back to Desk.com after they have finished logging in or out.", array('@login' => $login, '@logout' => $logout)) . '<p>';
+      
+      return $output;
+      break;
+   }
+}
+
+
+
+/**
+ * Callback function to create deskmp_admin_form.
+ */
+function deskmp_admin_form() {
+
+  global $base_url;
+  
+  $form['deskmp_site_key'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Site key'),
+    '#description' => t('The subdomain of your Desk.com account.'),
+    '#field_prefix' => 'http://',
+    '#field_suffix' => '.desk.com',
+    '#size' => 20,
+    '#required' => TRUE,
+    '#default_value' => variable_get('deskmp_site_key', NULL),
+  );
+  
+  $form['deskmp_multipass_key'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Multipass key'),
+    '#description' => t('Your multiplass API key. !link ', array('!link' => l(t('Click here for more information about obtaining your Multipass API key.'), 'http://dev.desk.com/docs/portal/multipass', array('attributes' => array('target' => '_blank'))))),
+    '#size' => 38,
+    '#required' => TRUE,
+    '#default_value' => variable_get('deskmp_multipass_key', NULL),
+  );
+  
+  $form['deskmp_path'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Local path'),
+    '#description' => t('The local path that will direct users to your Desk installation.'),
+    '#field_prefix' => "$base_url/",
+    '#size' => 30,
+    '#required' => TRUE,
+    '#default_value' => variable_get('deskmp_path', 'support'),
+  );
+  
+  $form['deskmp_redirect'] = array(
+    '#type' => 'checkbox',
+    '#title' => t('Allow login/logout redirection to the desk.com site'),
+    '#description' => t('Set the login and logout redirects on Desk.com to user/login/desk and user/logout/desk, respectively. If they log in/out by visiting these paths, they will be directed back to your Desk site.'),
+    '#default_value' => variable_get('deskmp_redirect', TRUE),
+  );
+  
+  $form['#submit'][] = 'deskmp_admin_form_submit_message';
+
+  return system_settings_form($form);
+}
+
+
+
+/**
+ * Additional submit callback for deskmp_admin_form.
+ */
+function deskmp_admin_form_submit_message($form, &$form_state) {  
+  // If the path settings have changed, prompt the user to clear the cache.
+  if ($form_state['values']['deskmp_path'] != variable_get('deskmp_path', 'support')) {
+    drupal_set_message(t('You will need to !clear for your path setting to take effect.', array('!clear' => l(t('clear your cache'), 'admin/config/development/performance'))), 'warning');
+  }
+}
+
+
+
+/**
+ * Page callback for the redirection page.
+ */
+function deskmp_redirect_page() {
+  if (_deskmp_is_configured()) {
+    deskmp_redirect();
+  }
+  
+  else {
+    return t('Desk Multipass redirection has not been properly configured.');
+  }
+}
+
 
 
 
@@ -38,16 +199,19 @@ function deskmp_menu() {
  *   Return value
  */
 function deskmp_redirect() {
-  if (user_is_logged_in()) {
-    $destination = deskmp_multipass_url();
+  if (_deskmp_is_configured()) {
+    // Redirect the user to the appropriate desk.com destination.
+    if (user_is_logged_in()) {
+      $destination = deskmp_multipass_url();
+    }
+    
+    else {
+      $subdomain = DESKMP_SITE_KEY;
+      $destination = "http://$subdomain.desk.com";
+    }
+    
+    drupal_goto($destination);
   }
-  
-  else {
-    $subdomain = DESKMP_SITE_KEY;
-    $destination = "http://$subdomain.desk.com";
-  }
-  
-  drupal_goto($destination);
 }
 
 
@@ -119,15 +283,9 @@ function deskmp_multipass_url() {
 
 
 
-function deskmp_request() {
-  $url = "https://$api:$secret@$subdomain.mynd5.com/api/$version/$resource.$format";
-
-  $options = array(
-    'method' => 'POST',
-    'headers' => array('Content-type' => 'application/x-www-form-urlencoded'),
-  );
+function _deskmp_is_configured() {
+  $site_key = variable_get('deskmp_site_key', NULL);
+  $multipass_key = variable_get('deskmp_multipass_key', NULL);
   
-  $options['data'] = 'myvariable1=myvalue&myvariable2=myvalue2';
-  
-  $result = drupal_http_request($url, $options)->data;
+  return (!empty($site_key) && !empty($multipass_key));
 }

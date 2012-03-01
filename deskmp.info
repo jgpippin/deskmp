@@ -4,5 +4,7 @@ description = Integration with Desk.com
 core = 7.x
 package = Custom
 
+configure = admin/config/system/deskmp
+
 files[] = desk.module
 files[] = desk.install
