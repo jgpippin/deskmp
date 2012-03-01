@@ -9,6 +9,7 @@ define('DESKMP_SITE_KEY', variable_get('deskmp_site_key', NULL));
 define('DESKMP_MULTIPASS_API_KEY', variable_get('deskmp_multipass_key', NULL));
 
 
+
 /**
  * Implement hook_menu
  */
@@ -27,7 +28,7 @@ function deskmp_menu() {
   
   $items[variable_get('deskmp_path', 'support')] = array(
     'title' => 'Support', 
-    'page callback' => 'deskmp_redirect',
+    'page callback' => 'deskmp_redirect_page',
     'access callback' => TRUE,
     'type' => MENU_NORMAL_ITEM,
   );
@@ -60,7 +61,7 @@ function deskmp_user_login(&$edit, $account) {
   // point to.
   if (!isset($_POST['form_id']) || $_POST['form_id'] != 'user_pass_reset') {
     if (variable_get('deskmp_redirect', TRUE) && ($_GET['q'] == 'user/login/desk') && !isset($_GET['destination'])) {
-      deskmp_redirect();
+      $GLOBALS['destination'] = deskmp_multipass_url();
     }
   }
 }
@@ -75,7 +76,7 @@ function deskmp_user_logout($account) {
   // user/logout/desk. This is where the desk.com multipass logout callback 
   // should point to.
   if (variable_get('deskmp_redirect', TRUE) && ($_GET['q'] == 'user/logout/desk') && !isset($_GET['destination'])) {
-    deskmp_redirect();
+    $GLOBALS['destination'] = deskmp_multipass_url(FALSE);
   }
 }
 
@@ -178,7 +179,7 @@ function deskmp_admin_form_submit_message($form, &$form_state) {
  */
 function deskmp_redirect_page() {
   if (_deskmp_is_configured()) {
-    deskmp_redirect();
+    drupal_goto(deskmp_multipass_url());
   }
   
   else {
@@ -188,29 +189,21 @@ function deskmp_redirect_page() {
 
 
 
-
 /**
- * Some explanation of what the function does
- *
- * @param $data
- *   Information about this parameter
- *
- * @return
- *   Return value
+ * Implements hook_drupal_goto_alter
  */
-function deskmp_redirect() {
-  if (_deskmp_is_configured()) {
-    // Redirect the user to the appropriate desk.com destination.
-    if (user_is_logged_in()) {
-      $destination = deskmp_multipass_url();
+function deskmp_drupal_goto_alter(&$path, &$options, &$http_response_code) {
+  if (isset($GLOBALS['destination'])) {
+    $destination = $GLOBALS['destination'];
+
+    // alter drupal_goto
+    if (is_array($destination)) {
+      $path = $destination[0];
+      $options = $destination[1];
     }
-    
     else {
-      $subdomain = DESKMP_SITE_KEY;
-      $destination = "http://$subdomain.desk.com";
+      $path = $destination;
     }
-    
-    drupal_goto($destination);
   }
 }
 
@@ -225,60 +218,66 @@ function deskmp_redirect() {
  * @return
  *   Return value
  */
-function deskmp_multipass_url() {
+function deskmp_multipass_url($login = TRUE) {
 
   global $user;
-
-  $hash = hash('sha1', DESKMP_MULTIPASS_API_KEY . DESKMP_SITE_KEY, TRUE);
-  $salted = substr($hash, 0, 16);
-  $iv = 'OpenSSL for Ruby';
-  
-  // Build json data
-  $user_data = array(
-    'uid' => $user->uid,
-    'customer_email' => $user->mail,
-    'customer_name' => $user->name,
-    'expires' => date('c', strtotime('+5 minutes')),
-  );
-  
-  $data = json_encode($user_data);
-  
-  // XOR first block of data with IV
-  for ($i = 0; $i < 16; $i++) {
-    $data[$i] = $data[$i] ^ $iv[$i];
-  }
-  
-  // pad using standard PKCS#5 padding with block size of 16 bytes
-  $pad = 16 - (strlen($data) % 16);
-  $data = $data . str_repeat(chr($pad), $pad);
-  
-  // encrypt data using AES128-cbc
-  $cipher = mcrypt_module_open(MCRYPT_RIJNDAEL_128, '', MCRYPT_MODE_CBC, '');
-  mcrypt_generic_init($cipher, $salted, $iv);
-  $multipass = mcrypt_generic($cipher, $data);
-  mcrypt_generic_deinit($cipher);
-  
-  // Base64 encode the encrypted data
-  $multipass = base64_encode($multipass);
-  
-  // Convert encoded data to the URL safe variant
-  $multipass = preg_replace('/\=$/', '', $multipass);
-  $multipass = preg_replace('/\n/', '', $multipass);
-  $multipass = preg_replace('/\+/', '-', $multipass);
-  $multipass = preg_replace('/\//', '_', $multipass);
-  
-  // Build an HMAC-SHA1 signature using the multipass string and your API key
-  $signature = hash_hmac("sha1", $multipass, DESKMP_MULTIPASS_API_KEY, TRUE);
-  
-  // Base64 encode the signature
-  $signature = base64_encode($signature);
-  
-  // Finally, URL encode the multipass and signature
-  $multipass = urlencode($multipass);
-  $signature = urlencode($signature);
   
   $subdomain = DESKMP_SITE_KEY;
-  return "http://$subdomain.desk.com/customer/authentication/multipass/callback?multipass=$multipass&signature=$signature";
+  $destination = "http://$subdomain.desk.com";
+  
+  if (user_is_logged_in() && $login) {
+    $hash = hash('sha1', DESKMP_MULTIPASS_API_KEY . DESKMP_SITE_KEY, TRUE);
+    $salted = substr($hash, 0, 16);
+    $iv = 'OpenSSL for Ruby';
+    
+    // Build json data
+    $user_data = array(
+      'uid' => $user->uid,
+      'customer_email' => $user->mail,
+      'customer_name' => $user->name,
+      'expires' => date('c', strtotime('+5 minutes')),
+    );
+    
+    $data = json_encode($user_data);
+    
+    // XOR first block of data with IV
+    for ($i = 0; $i < 16; $i++) {
+      $data[$i] = $data[$i] ^ $iv[$i];
+    }
+    
+    // pad using standard PKCS#5 padding with block size of 16 bytes
+    $pad = 16 - (strlen($data) % 16);
+    $data = $data . str_repeat(chr($pad), $pad);
+    
+    // encrypt data using AES128-cbc
+    $cipher = mcrypt_module_open(MCRYPT_RIJNDAEL_128, '', MCRYPT_MODE_CBC, '');
+    mcrypt_generic_init($cipher, $salted, $iv);
+    $multipass = mcrypt_generic($cipher, $data);
+    mcrypt_generic_deinit($cipher);
+    
+    // Base64 encode the encrypted data
+    $multipass = base64_encode($multipass);
+    
+    // Convert encoded data to the URL safe variant
+    $multipass = preg_replace('/\=$/', '', $multipass);
+    $multipass = preg_replace('/\n/', '', $multipass);
+    $multipass = preg_replace('/\+/', '-', $multipass);
+    $multipass = preg_replace('/\//', '_', $multipass);
+    
+    // Build an HMAC-SHA1 signature using the multipass string and your API key
+    $signature = hash_hmac("sha1", $multipass, DESKMP_MULTIPASS_API_KEY, TRUE);
+    
+    // Base64 encode the signature
+    $signature = base64_encode($signature);
+    
+    // Finally, URL encode the multipass and signature
+    $multipass = urlencode($multipass);
+    $signature = urlencode($signature);
+    
+    $destination .= "/customer/authentication/multipass/callback?multipass=$multipass&signature=$signature";
+  }
+  
+  return $destination;
 }
 
 
